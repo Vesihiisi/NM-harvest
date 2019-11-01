@@ -67,16 +67,20 @@ def get_image_paths(article_data):
     @param article_data: raw API response
     @type article_data: string
     """
+    file_url = "http://dokumentlager.nordiskamuseet.se/"\
+        "binaryDownload/{}?profile={}&mimeType={}"
     paths = []
     article_data = json.loads(article_data)
     resources = [x for x in article_data if x["entityType"] == "Resource"]
     files = [x["properties"]["resource.originalFile"] for x in resources]
     for fil in files:
         images = [x for x in fil if x["value"]["mimeType"] == "image/tiff"]
+        reference = [x["value"]["reference"] for x in images][0]
+        mimetype = [x["value"]["mimeType"] for x in images][0]
+        profile = [x["value"]["profile"] for x in images][0]
         filename = [x["value"]["originalFileName"] for x in images][0]
-        url = [x["value"]["url"] for x in images][0]
-        max_url = url.split("=")[0] + "=max"
-        paths.append({"filename": filename, "url": max_url})
+        url = file_url.format(reference, profile, mimetype)
+        paths.append({"filename": filename, "url": url})
     return paths
 
 
@@ -95,9 +99,10 @@ def download_images(url_list, internal_id):
     """
     target_dir = create_directory(internal_id)
     for url in url_list:
+        path = os.path.join(target_dir, url["filename"])
+        print(url)
         img_data = requests.get(url["url"]).content
-        jpg_name = url["filename"].split(".")[0] + ".jpg"
-        with open(os.path.join(target_dir, jpg_name), 'wb') as handler:
+        with open(path, 'wb') as handler:
             handler.write(img_data)
 
 
@@ -128,10 +133,10 @@ def create_djvu(dirname):
     target_dir = create_directory("output")
     tmp_djvu = "tmp.djvu"
     book_djvu = os.path.join(target_dir, "{}.djvu".format(dirname))
-    files = sorted([x for x in os.listdir(dirname) if x.endswith(".jpg")])
+    files = sorted([x for x in os.listdir(dirname) if x.endswith(".tif")])
     for i, page in tqdm(enumerate(files, 1), total=len(files)):
-        run(['c44', '-crcbfull', os.path.join(dirname, page), tmp_djvu],
-            check=True)
+        run(['cjb2', '-clean', os.path.join(dirname, page),
+             tmp_djvu], check=True)
         if i == 1:
             run(['djvm', '-c', book_djvu, tmp_djvu], check=True)
         else:
