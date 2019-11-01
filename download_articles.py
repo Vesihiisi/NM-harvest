@@ -67,7 +67,7 @@ def get_image_paths(article_data):
     @param article_data: raw API response
     @type article_data: string
     """
-    file_url = "http://dokumentlager.nordiskamuseet.se/"\
+    file_url = "https://dokumentlager.nordiskamuseet.se/"\
         "binaryDownload/{}?profile={}&mimeType={}"
     paths = []
     article_data = json.loads(article_data)
@@ -84,7 +84,7 @@ def get_image_paths(article_data):
     return paths
 
 
-def download_images(url_list, internal_id):
+def download_images(url_list, internal_id, auth):
     """
     Download all images in a url list.
 
@@ -100,8 +100,7 @@ def download_images(url_list, internal_id):
     target_dir = create_directory(internal_id)
     for url in url_list:
         path = os.path.join(target_dir, url["filename"])
-        print(url)
-        img_data = requests.get(url["url"]).content
+        img_data = requests.get(url["url"], auth=auth).content
         with open(path, 'wb') as handler:
             handler.write(img_data)
 
@@ -118,7 +117,7 @@ def download_files_of_article(internal_id):
     auth = (config.username, config.password)
     response = requests.get(url, auth=auth)
     article_images = get_image_paths(response.text)
-    download_images(article_images, internal_id)
+    download_images(article_images, internal_id, auth)
 
 
 def create_djvu(dirname):
@@ -130,17 +129,19 @@ def create_djvu(dirname):
     @param dirname: name of directory with images
     @type dirname: string
     """
-    target_dir = create_directory("output")
+    target_dir = create_directory("output2")
     tmp_djvu = "tmp.djvu"
     book_djvu = os.path.join(target_dir, "{}.djvu".format(dirname))
     files = sorted([x for x in os.listdir(dirname) if x.endswith(".tif")])
     for i, page in tqdm(enumerate(files, 1), total=len(files)):
-        run(['cjb2', '-clean', os.path.join(dirname, page),
-             tmp_djvu], check=True)
+        tmp_jpg = os.path.join(target_dir, "{}.jpg".format(page))
+        run(['convert', os.path.join(dirname, page), tmp_jpg], check=True)
+        run(['c44', '-crcbfull', tmp_jpg, tmp_djvu], check=True)
         if i == 1:
             run(['djvm', '-c', book_djvu, tmp_djvu], check=True)
         else:
             run(['djvm', '-i', book_djvu, tmp_djvu], check=True)
+        os.remove(tmp_jpg)
     os.remove(tmp_djvu)
 
 
@@ -190,12 +191,12 @@ def can_djvu():
     Check whether DjVuLibre is installed,
     on PATH and marked as executable.
     """
-    return which('djvm') is not None and which('cjb2') is not None
+    return which('djvm') is not None and which('c44') is not None
 
 
 if __name__ == "__main__":
     if not can_djvu():
-        raise Exception('Djvu utils djvm and cjb2 not found.')
+        raise Exception('Djvu utils djvm and c44 not found.')
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument("--list", required=True)
     ARGS = PARSER.parse_args()
