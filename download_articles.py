@@ -67,20 +67,24 @@ def get_image_paths(article_data):
     @param article_data: raw API response
     @type article_data: string
     """
+    file_url = "https://dokumentlager.nordiskamuseet.se/"\
+        "binaryDownload/{}?profile={}&mimeType={}"
     paths = []
     article_data = json.loads(article_data)
     resources = [x for x in article_data if x["entityType"] == "Resource"]
     files = [x["properties"]["resource.originalFile"] for x in resources]
     for fil in files:
         images = [x for x in fil if x["value"]["mimeType"] == "image/tiff"]
+        reference = [x["value"]["reference"] for x in images][0]
+        mimetype = [x["value"]["mimeType"] for x in images][0]
+        profile = [x["value"]["profile"] for x in images][0]
         filename = [x["value"]["originalFileName"] for x in images][0]
-        url = [x["value"]["url"] for x in images][0]
-        max_url = url.split("=")[0] + "=max"
-        paths.append({"filename": filename, "url": max_url})
+        url = file_url.format(reference, profile, mimetype)
+        paths.append({"filename": filename, "url": url})
     return paths
 
 
-def download_images(url_list, internal_id):
+def download_images(url_list, internal_id, auth):
     """
     Download all images in a url list.
 
@@ -95,9 +99,9 @@ def download_images(url_list, internal_id):
     """
     target_dir = create_directory(internal_id)
     for url in url_list:
-        img_data = requests.get(url["url"]).content
-        jpg_name = url["filename"].split(".")[0] + ".jpg"
-        with open(os.path.join(target_dir, jpg_name), 'wb') as handler:
+        path = os.path.join(target_dir, url["filename"])
+        img_data = requests.get(url["url"], auth=auth).content
+        with open(path, 'wb') as handler:
             handler.write(img_data)
 
 
@@ -113,7 +117,7 @@ def download_files_of_article(internal_id):
     auth = (config.username, config.password)
     response = requests.get(url, auth=auth)
     article_images = get_image_paths(response.text)
-    download_images(article_images, internal_id)
+    download_images(article_images, internal_id, auth)
 
 
 def create_djvu(dirname):
@@ -125,17 +129,19 @@ def create_djvu(dirname):
     @param dirname: name of directory with images
     @type dirname: string
     """
-    target_dir = create_directory("output")
+    target_dir = create_directory("output2")
     tmp_djvu = "tmp.djvu"
     book_djvu = os.path.join(target_dir, "{}.djvu".format(dirname))
-    files = sorted([x for x in os.listdir(dirname) if x.endswith(".jpg")])
+    files = sorted([x for x in os.listdir(dirname) if x.endswith(".tif")])
     for i, page in tqdm(enumerate(files, 1), total=len(files)):
-        run(['c44', '-crcbfull', os.path.join(dirname, page), tmp_djvu],
-            check=True)
+        tmp_jpg = os.path.join(target_dir, "{}.jpg".format(page))
+        run(['convert', os.path.join(dirname, page), tmp_jpg], check=True)
+        run(['c44', '-crcbfull', tmp_jpg, tmp_djvu], check=True)
         if i == 1:
             run(['djvm', '-c', book_djvu, tmp_djvu], check=True)
         else:
             run(['djvm', '-i', book_djvu, tmp_djvu], check=True)
+        os.remove(tmp_jpg)
     os.remove(tmp_djvu)
 
 
@@ -185,12 +191,12 @@ def can_djvu():
     Check whether DjVuLibre is installed,
     on PATH and marked as executable.
     """
-    return which('djvm') is not None and which('cjb2') is not None
+    return which('djvm') is not None and which('c44') is not None
 
 
 if __name__ == "__main__":
     if not can_djvu():
-        raise Exception('Djvu utils djvm and cjb2 not found.')
+        raise Exception('Djvu utils djvm and c44 not found.')
     PARSER = argparse.ArgumentParser()
     PARSER.add_argument("--list", required=True)
     ARGS = PARSER.parse_args()
